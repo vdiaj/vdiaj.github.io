@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project IDX dev.nix Generator</title>
+    <style>
+        :root {
+            --primary: #1a73e8;
+            --bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --border: #dadce0;
+            --text: #202124;
+            --code-bg: #282c34;
+            --code-text: #abb2bf;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            gap: 20px;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        /* Layout */
+        .container {
+            display: flex;
+            width: 100%;
+            max-width: 1600px;
+            margin: 0 auto;
+            gap: 20px;
+        }
+
+        .config-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        .preview-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--code-bg);
+            border-radius: 8px;
+            overflow: hidden;
+            position: sticky;
+            top: 0;
+            height: calc(100vh - 40px);
+        }
+
+        /* Components */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        h3 { font-size: 1rem; margin-top: 15px; margin-bottom: 10px; color: #5f6368; }
+
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 0.9rem; }
+        
+        input[type="text"], 
+        input[type="number"], 
+        select, 
+        textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-family: inherit;
+        }
+
+        .row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .btn:hover { opacity: 0.9; }
+        .btn-secondary { background: #5f6368; }
+        .btn-danger { background: #d93025; }
+        .btn-sm { padding: 4px 8px; font-size: 0.8rem; }
+
+        /* Toggles */
+        .toggle-wrapper { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .service-config { margin-left: 25px; padding-left: 15px; border-left: 2px solid var(--border); display: none; }
+        .service-config.active { display: block; }
+
+        /* Code Output */
+        .code-header {
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        pre {
+            margin: 0;
+            padding: 20px;
+            color: var(--code-text);
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            overflow: auto;
+            flex: 1;
+        }
+        
+        .helper-text { font-size: 0.8rem; color: #5f6368; margin-top: 2px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="config-panel" id="configPanel">
+        
+        <div class="card">
+            <h2>General Configuration</h2>
+            <div class="form-group">
+                <label>Nix Channel</label>
+                <select id="channel">
+                    <option value="stable-23.11" selected>stable-23.11</option>
+                    <option value="stable-24.05">stable-24.05</option>
+                    <option value="stable-23.05">stable-23.05</option>
+                    <option value="unstable">unstable</option>
+                </select>
+                <div class="helper-text">Defines the version of packages available.</div>
+            </div>
+            
+            <div class="form-group">
+                <label>Packages (Comma separated)</label>
+                <input type="text" id="packages" placeholder="pkgs.python3, pkgs.nodejs_20, pkgs.go">
+                <div class="helper-text">Example: pkgs.python3, pkgs.nodePackages.firebase-tools</div>
+            </div>
+
+            <div class="form-group">
+                <label>VS Code Extensions (ID list)</label>
+                <textarea id="extensions" rows="3" placeholder="golang.go&#10;rangav.vscode-thunder-client"></textarea>
+                <div class="helper-text">One per line or comma separated. Format: publisher.extension</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Environment Variables</h2>
+            <div id="envList"></div>
+            <button class="btn btn-secondary btn-sm" onclick="addEnvRow()">+ Add Variable</button>
+        </div>
+
+        <div class="card">
+            <h2>Services</h2>
+            
+            <div class="toggle-wrapper">
+                <input type="checkbox" id="srv_postgres_enable" onchange="toggleService('postgres')">
+                <label for="srv_postgres_enable">PostgreSQL</label>
+            </div>
+            <div id="config_postgres" class="service-config">
+                <div class="form-group">
+                    <label>Package</label>
+                    <input type="text" id="srv_postgres_package" placeholder="pkgs.postgresql_15">
+                </div>
+                <div class="toggle-wrapper">
+                    <input type="checkbox" id="srv_postgres_tcp" checked>
+                    <label>Enable TCP</label>
+                </div>
+                <div class="form-group">
+                    <label>Extensions (Select multiple)</label>
+                    <select id="srv_postgres_extensions" multiple style="height: 100px;">
+                        <option value="pgvector">pgvector</option>
+                        <option value="postgis">postgis</option>
+                        <option value="pg_cron">pg_cron</option>
+                        <option value="pg_uuidv7">pg_uuidv7</option>
+                    </select>
+                    <div class="helper-text">Hold Ctrl/Cmd to select multiple</div>
+                </div>
+            </div>
+
+            <div class="toggle-wrapper">
+                <input type="checkbox" id="srv_redis_enable" onchange="toggleService('redis')">
+                <label for="srv_redis_enable">Redis</label>
+            </div>
+            <div id="config_redis" class="service-config">
+                <div class="form-group">
+                    <label>Port (0 for default socket only)</label>
+                    <input type="number" id="srv_redis_port" value="6379">
+                </div>
+            </div>
+
+            <div class="toggle-wrapper">
+                <input type="checkbox" id="srv_docker_enable">
+                <label for="srv_docker_enable">Docker (Rootless)</label>
+            </div>
+
+            <div class="toggle-wrapper">
+                <input type="checkbox" id="srv_mysql_enable" onchange="toggleService('mysql')">
+                <label for="srv_mysql_enable">MySQL</label>
+            </div>
+            <div id="config_mysql" class="service-config">
+                <div class="form-group">
+                    <label>Package</label>
+                    <input type="text" id="srv_mysql_package" placeholder="pkgs.mysql80">
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Workspace Lifecycle</h2>
+            
+            <h3>onCreate (First setup)</h3>
+            <div id="onCreateList"></div>
+            <button class="btn btn-secondary btn-sm" onclick="addHookRow('onCreate')">+ Add Command</button>
+
+            <h3>onStart (Every open)</h3>
+            <div id="onStartList"></div>
+            <button class="btn btn-secondary btn-sm" onclick="addHookRow('onStart')">+ Add Command</button>
+            
+            <h3>Files to Open</h3>
+            <div class="form-group">
+                <input type="text" id="openFiles" placeholder="src/index.ts, README.md">
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="toggle-wrapper">
+                <input type="checkbox" id="previews_enable" checked onchange="togglePreviews()">
+                <label for="previews_enable">Enable Previews</label>
+            </div>
+            
+            <div id="previews_container" class="service-config active">
+                <div id="previewList"></div>
+                <button class="btn btn-secondary btn-sm" onclick="addPreview()">+ Add Preview</button>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="preview-panel">
+        <div class="code-header">
+            <span>.idx/dev.nix</span>
+            <button class="btn" onclick="copyCode()">Copy</button>
+        </div>
+        <pre id="outputCode"></pre>
+    </div>
+</div>
+
+<script>
+    // --- State Management Helpers ---
+    
+    function update() {
+        generateNix();
+    }
+
+    function el(id) { return document.getElementById(id); }
+
+    // --- Dynamic Inputs (Environment Variables) ---
+
+    function addEnvRow() {
+        const container = el('envList');
+        const div = document.createElement('div');
+        div.className = 'row';
+        div.innerHTML = `
+            <input type="text" placeholder="KEY" class="env-key" oninput="update()">
+            <input type="text" placeholder="Value" class="env-val" oninput="update()">
+            <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove(); update()">×</button>
+        `;
+        container.appendChild(div);
+    }
+
+    // --- Dynamic Inputs (Lifecycle Hooks) ---
+
+    function addHookRow(type) {
+        const container = el(type + 'List');
+        const div = document.createElement('div');
+        div.className = 'row';
+        div.innerHTML = `
+            <input type="text" placeholder="Command Name (e.g. npm-install)" class="hook-key" oninput="update()">
+            <input type="text" placeholder="Command (e.g. npm install)" class="hook-val" oninput="update()">
+            <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove(); update()">×</button>
+        `;
+        container.appendChild(div);
+    }
+
+    // --- Dynamic Inputs (Previews) ---
+
+    function addPreview() {
+        const container = el('previewList');
+        const id = Date.now();
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.style.background = '#f1f3f4';
+        div.innerHTML = `
+            <div class="row" style="justify-content: space-between">
+                <strong>Preview Config</strong>
+                <button class="btn btn-danger btn-sm" onclick="this.parentElement.parentElement.remove(); update()">Remove</button>
+            </div>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" class="prev-name" placeholder="web" value="web" oninput="update()">
+            </div>
+            <div class="form-group">
+                <label>Command (Space separated)</label>
+                <input type="text" class="prev-cmd" placeholder="npm run dev" oninput="update()">
+            </div>
+            <div class="form-group">
+                <label>Manager</label>
+                <select class="prev-manager" onchange="update()">
+                    <option value="web">web</option>
+                    <option value="flutter">flutter</option>
+                    <option value="android">android</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Port (Optional Env)</label>
+                <input type="number" class="prev-port" placeholder="PORT variable value e.g. 3000" oninput="update()">
+            </div>
+        `;
+        container.appendChild(div);
+    }
+
+    // --- Toggles ---
+    function toggleService(name) {
+        const chk = el(`srv_${name}_enable`);
+        const config = el(`config_${name}`);
+        if(config) {
+            config.style.display = chk.checked ? 'block' : 'none';
+        }
+        update();
+    }
+
+    function togglePreviews() {
+        const chk = el('previews_enable');
+        el('previews_container').style.display = chk.checked ? 'block' : 'none';
+        update();
+    }
+
+    // --- Generator Logic ---
+
+    function generateNix() {
+        const channel = el('channel').value;
+        
+        // Packages
+        let packages = el('packages').value.split(',').map(s => s.trim()).filter(s => s);
+        
+        // Extensions
+        let extensions = el('extensions').value.split(/[\n,]/).map(s => s.trim()).filter(s => s);
+        
+        // Env Vars
+        let envs = {};
+        document.querySelectorAll('#envList .row').forEach(row => {
+            const k = row.querySelector('.env-key').value;
+            const v = row.querySelector('.env-val').value;
+            if(k) envs[k] = v;
+        });
+
+        // Services
+        let services = {};
+        
+        if(el('srv_docker_enable').checked) services['docker'] = { enable: true };
+        
+        if(el('srv_postgres_enable').checked) {
+            let pg = { enable: true };
+            const pgPkg = el('srv_postgres_package').value;
+            if(pgPkg) pg['package'] = pgPkg;
+            if(!el('srv_postgres_tcp').checked) pg['enableTcp'] = false;
+            
+            const pgExts = Array.from(el('srv_postgres_extensions').selectedOptions).map(o => o.value);
+            if(pgExts.length) pg['extensions'] = pgExts;
+            services['postgres'] = pg;
+        }
+
+        if(el('srv_mysql_enable').checked) {
+            let my = { enable: true };
+            const myPkg = el('srv_mysql_package').value;
+            if(myPkg) my['package'] = myPkg;
+            services['mysql'] = my;
+        }
+
+        if(el('srv_redis_enable').checked) {
+            let redis = { enable: true };
+            const port = el('srv_redis_port').value;
+            if(port) redis['port'] = parseInt(port);
+            services['redis'] = redis;
+        }
+
+        // Previews
+        let previews = {};
+        const previewsEnabled = el('previews_enable').checked;
+        if(previewsEnabled) {
+            document.querySelectorAll('#previewList .card').forEach(card => {
+                const name = card.querySelector('.prev-name').value || 'web';
+                const cmdStr = card.querySelector('.prev-cmd').value;
+                const manager = card.querySelector('.prev-manager').value;
+                const port = card.querySelector('.prev-port').value;
+                
+                let pConfig = {
+                    manager: manager,
+                };
+                
+                if(cmdStr) {
+                    // Simple split by space, ideally should handle quotes but keeping simple for generator
+                    pConfig['command'] = cmdStr.split(' ').filter(s => s);
+                }
+
+                if(port) {
+                    pConfig['env'] = { PORT: port };
+                }
+                
+                previews[name] = pConfig;
+            });
+        }
+
+        // Lifecycle
+        let onCreate = {};
+        document.querySelectorAll('#onCreateList .row').forEach(row => {
+            const k = row.querySelector('.hook-key').value;
+            const v = row.querySelector('.hook-val').value;
+            if(k && v) onCreate[k] = v;
+        });
+
+        let onStart = {};
+        document.querySelectorAll('#onStartList .row').forEach(row => {
+            const k = row.querySelector('.hook-key').value;
+            const v = row.querySelector('.hook-val').value;
+            if(k && v) onStart[k] = v;
+        });
+        
+        const openFiles = el('openFiles').value.split(',').map(s => s.trim()).filter(s => s);
+        if(openFiles.length > 0) {
+            onCreate['default.openFiles'] = openFiles;
+            onStart['default.openFiles'] = openFiles;
+        }
+
+        // --- Construction ---
+        let out = `{ pkgs, ... }:\n{\n`;
+        out += `  channel = "${channel}";\n`;
+        
+        // Packages
+        if(packages.length) {
+            out += `  packages = [\n`;
+            packages.forEach(p => out += `    ${p}\n`);
+            out += `  ];\n`;
+        }
+
+        // Env
+        if(Object.keys(envs).length) {
+            out += `  env = {\n`;
+            for(let k in envs) {
+                out += `    ${k} = "${envs[k]}";\n`;
+            }
+            out += `  };\n`;
+        }
+
+        // Extensions
+        if(extensions.length) {
+            out += `  idx.extensions = [\n`;
+            extensions.forEach(e => out += `    "${e}"\n`);
+            out += `  ];\n`;
+        }
+
+        // Previews
+        if(previewsEnabled) {
+            out += `  idx.previews = {\n`;
+            out += `    enable = true;\n`;
+            if(Object.keys(previews).length) {
+                out += `    previews = {\n`;
+                for(let name in previews) {
+                    out += `      ${name} = {\n`;
+                    const p = previews[name];
+                    if(p.command) out += `        command = [ ${p.command.map(c => `"${c}"`).join(' ')} ];\n`;
+                    out += `        manager = "${p.manager}";\n`;
+                    if(p.env) {
+                        out += `        env = {\n`;
+                        for(let k in p.env) out += `          ${k} = "${p.env[k]}";\n`;
+                        out += `        };\n`;
+                    }
+                    out += `      };\n`;
+                }
+                out += `    };\n`;
+            }
+            out += `  };\n`;
+        }
+
+        // Lifecycle
+        const printHooks = (name, obj) => {
+            if(Object.keys(obj).length === 0) return;
+            out += `  idx.workspace.${name} = {\n`;
+            for(let k in obj) {
+                if(Array.isArray(obj[k])) {
+                    // Open Files
+                    out += `    ${k} = [ ${obj[k].map(f => `"${f}"`).join(' ')} ];\n`;
+                } else {
+                    out += `    ${k} = "${obj[k]}";\n`;
+                }
+            }
+            out += `  };\n`;
+        };
+
+        printHooks('onCreate', onCreate);
+        printHooks('onStart', onStart);
+
+        // Services
+        if(Object.keys(services).length) {
+            out += `  services = {\n`;
+            for(let sName in services) {
+                const sData = services[sName];
+                out += `    ${sName} = {\n`;
+                for(let k in sData) {
+                    let val = sData[k];
+                    if(Array.isArray(val)) {
+                        val = `[ ${val.map(v => `"${v}"`).join(' ')} ]`;
+                    } else if (typeof val === 'string') {
+                        val = (val.startsWith('pkgs.')) ? val : `"${val}"`;
+                    }
+                    out += `      ${k} = ${val};\n`;
+                }
+                out += `    };\n`;
+            }
+            out += `  };\n`;
+        }
+
+        out += `}\n`;
+        
+        el('outputCode').textContent = out;
+    }
+
+    function copyCode() {
+        const text = el('outputCode').textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = document.querySelector('.preview-panel .btn');
+            const original = btn.textContent;
+            btn.textContent = 'Copied!';
+            setTimeout(() => btn.textContent = original, 2000);
+        });
+    }
+
+    // Init
+    document.querySelectorAll('input, select, textarea').forEach(i => i.addEventListener('input', update));
+    update();
+
+</script>
+</body>
+</html>
